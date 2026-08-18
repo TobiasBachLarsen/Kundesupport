@@ -1,4 +1,10 @@
 import json
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent / ".env")
 
 _RESPONSES: dict[str, dict] = {
     "refund": {
@@ -74,7 +80,7 @@ def _intent(besked: str) -> str:
     return "klage"
 
 
-def classify(prompt: str) -> dict:
+def _classify_local(prompt: str) -> dict:
     fields: dict[str, str] = {}
     for line in prompt.split("\n"):
         if ":" in line:
@@ -94,3 +100,26 @@ def classify(prompt: str) -> dict:
         "løsning":        entry["løsning"],
         "tid_sparet_min": entry["tid_sparet_min"],
     }
+
+
+def classify(prompt: str, model: str = "gpt-4o") -> dict:
+    api_key = os.environ.get("OPENAI_API_KEY")
+
+    if api_key:
+        import openai
+        client = openai.OpenAI(api_key=api_key)
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": "Du svarer altid i JSON."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.4,
+            )
+            return json.loads(response.choices[0].message.content)
+        except openai.OpenAIError as e:
+            print(f"  [AI-kald fejlede ({e.__class__.__name__}), falder tilbage til lokal klassificering]")
+
+    return _classify_local(prompt)

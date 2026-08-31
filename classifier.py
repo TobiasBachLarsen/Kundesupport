@@ -80,26 +80,69 @@ def _intent(besked: str) -> str:
     return "klage"
 
 
-def _classify_local(prompt: str) -> dict:
+def _parse_fields(prompt: str) -> dict[str, str]:
+    """Parse the 'Nøgle: værdi' lines from the prompt. 'Besked' is treated
+    specially since the customer's message may itself span multiple lines."""
     fields: dict[str, str] = {}
+    besked_lines: list[str] = []
+    in_besked = False
+
     for line in prompt.split("\n"):
+        if in_besked:
+            if not line.strip():
+                in_besked = False
+                continue
+            besked_lines.append(line.strip())
+            continue
         if ":" in line:
             key, _, val = line.partition(":")
-            fields[key.strip().lower()] = val.strip()
+            key = key.strip().lower()
+            if key == "besked":
+                besked_lines.append(val.strip())
+                in_besked = True
+            else:
+                fields[key] = val.strip()
+
+    fields["besked"] = " ".join(besked_lines).strip()
+    return fields
+
+
+def _classify_local(prompt: str) -> dict:
+    fields = _parse_fields(prompt)
 
     besked = fields.get("besked", "")
-    navn   = fields.get("kundens navn", "").split()[0]
-    email  = fields.get("kundens e-mail", "")
-    ordre  = fields.get("ordre-id", "")
+    navn_parts = fields.get("kundens navn", "").split()
+    navn = navn_parts[0] if navn_parts else "kunde"
+    email = fields.get("kundens e-mail", "")
+    ordre = fields.get("ordre-id", "")
+    if ordre.lower() in ("", "ikke oplyst"):
+        ordre = ""
 
-    entry = _RESPONSES[_intent(besked)]
+    intent = _intent(besked)
+    entry = _RESPONSES[intent]
+
+    if intent in ("refund", "levering") and not ordre:
+        svar = (
+            f"Hej {navn},\n\n"
+            "Tak fordi du kontakter os. For at kunne hjælpe dig videre har jeg brug for dit "
+            "ordrenummer, kan du sende det til os, så går vi videre med det samme.\n\n"
+            "Med venlig hilsen,\nKundesupport"
+        )
+        løsning = "Afventer ordrenummer fra kunden."
+    else:
+        svar = entry["svar"].format(navn=navn, email=email, ordre=ordre)
+        løsning = entry["løsning"]
+
     return {
         "kategori":       entry["kategori"],
         "prioritet":      entry["prioritet"],
-        "svar":           entry["svar"].format(navn=navn, email=email, ordre=ordre),
-        "løsning":        entry["løsning"],
+        "svar":           svar,
+        "løsning":        løsning,
         "tid_sparet_min": entry["tid_sparet_min"],
     }
+
+
+_REQUIRED_FIELDS = {"kategori", "prioritet", "svar", "løsning", "tid_sparet_min"}
 
 
 def classify(prompt: str, model: str = "gpt-4o") -> dict:
@@ -118,8 +161,12 @@ def classify(prompt: str, model: str = "gpt-4o") -> dict:
                 ],
                 temperature=0.4,
             )
-            return json.loads(response.choices[0].message.content)
-        except openai.OpenAIError as e:
+            result = json.loads(response.choices[0].message.content)
+            missing = _REQUIRED_FIELDS - result.keys()
+            if missing:
+                raise ValueError(f"AI-svar mangler felter: {missing}")
+            return result
+        except (openai.OpenAIError, json.JSONDecodeError, ValueError, TypeError) as e:
             print(f"  [AI-kald fejlede ({e.__class__.__name__}), falder tilbage til lokal klassificering]")
 
     return _classify_local(prompt)

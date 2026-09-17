@@ -18,7 +18,8 @@ class Ticket:
 
     @property
     def fornavn(self) -> str:
-        return self.navn.split()[0] if self.navn.split() else "kunde"
+        dele = self.navn.split()
+        return dele[0] if dele else "kunde"
 
 
 @dataclass(frozen=True)
@@ -45,14 +46,22 @@ class Resultat:
         manglende = {"kategori", "prioritet", "svar", "løsning", "tid_sparet_min"} - data.keys()
         if manglende:
             raise ValueError(f"Svar mangler felter: {sorted(manglende)}")
+        # str(None) er "None", som ville gå igennem tomheds-tjekket og ende hos kunden som
+        # svar. Tekstfelterne skal derfor faktisk være tekst, ikke bare noget der kan blive det.
+        for felt in ("kategori", "prioritet", "svar", "løsning"):
+            if not isinstance(data[felt], str):
+                raise ValueError(f"{felt} skal være tekst, fik {type(data[felt]).__name__}")
+        tid_raa = data["tid_sparet_min"]
+        if isinstance(tid_raa, bool) or not isinstance(tid_raa, int | float | str):
+            raise ValueError(f"tid_sparet_min er ikke et tal: {tid_raa!r}")
         try:
-            tid = int(data["tid_sparet_min"])
+            tid = int(tid_raa)
         except (TypeError, ValueError) as e:
-            raise ValueError(f"tid_sparet_min er ikke et tal: {data['tid_sparet_min']!r}") from e
+            raise ValueError(f"tid_sparet_min er ikke et tal: {tid_raa!r}") from e
         return cls(
-            kategori=str(data["kategori"]).strip(),
-            prioritet=str(data["prioritet"]).strip(),
-            svar=str(data["svar"]),
-            løsning=str(data["løsning"]),
+            kategori=data["kategori"].strip(),
+            prioritet=data["prioritet"].strip(),
+            svar=data["svar"],
+            løsning=data["løsning"],
             tid_sparet_min=tid,
         )

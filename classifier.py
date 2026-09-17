@@ -20,6 +20,11 @@ from models import KATEGORIER, PRIORITETER, Resultat, Ticket
 log = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gpt-4o"
+# Et hængende API-kald skal ikke holde en ticket i 10 minutter (bibliotekets standard) før
+# den falder tilbage til den lokale vej. Ét forsøg til, så en enkelt netværksfejl ikke straks
+# giver et skabelon-svar.
+API_TIMEOUT_SECONDS = 20
+API_MAX_RETRIES = 1
 
 SYSTEM_PROMPT = f"""Du er en venlig og professionel kundesupport-medarbejder hos en dansk webshop.
 Du modtager en kundehenvendelse og svarer altid med ét JSON-objekt med præcis disse felter:
@@ -171,6 +176,8 @@ def classify_openai(ticket: Ticket, client: openai.OpenAI, model: str = DEFAULT_
         ],
         temperature=0.4,
     )
+    if not response.choices:
+        raise ValueError("AI-svar indeholder ingen choices")
     content = response.choices[0].message.content or ""
     try:
         data = json.loads(content)
@@ -184,18 +191,28 @@ def classify_openai(ticket: Ticket, client: openai.OpenAI, model: str = DEFAULT_
 # ── Valg af vej ──────────────────────────────────────────────────────────────
 
 
+def make_client(api_key: str) -> openai.OpenAI:
+    """OpenAI-klient med den timeout og retry-politik, fallback-designet forudsætter."""
+    return openai.OpenAI(api_key=api_key, timeout=API_TIMEOUT_SECONDS, max_retries=API_MAX_RETRIES)
+
+
+def resolve_model(model: str | None = None) -> str:
+    """Eksplicit model > OPENAI_MODEL i miljøet > standard. En tom miljøvariabel tæller som usat."""
+    return model or os.environ.get("OPENAI_MODEL") or DEFAULT_MODEL
+
+
 def classify(ticket: Ticket, client: openai.OpenAI | None = None, model: str | None = None) -> Resultat:
     """Brug OpenAI hvis en klient eller OPENAI_API_KEY findes, ellers den lokale regelmotor."""
     if client is None:
         api_key = os.environ.get("OPENAI_API_KEY")
         if api_key:
-            client = openai.OpenAI(api_key=api_key)
+            client = make_client(api_key)
 
     if client is None:
         return classify_local(ticket)
 
     try:
-        return classify_openai(ticket, client, model or os.environ.get("OPENAI_MODEL", DEFAULT_MODEL))
+        return classify_openai(ticket, client, resolve_model(model))
     except (openai.OpenAIError, ValueError) as e:
         log.warning(
             "AI-kald fejlede for %s (%s: %s), bruger lokal klassificering", ticket.id, type(e).__name__, e

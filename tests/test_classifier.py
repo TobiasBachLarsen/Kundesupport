@@ -94,3 +94,35 @@ def test_user_prompt_contains_ticket_fields_and_not_the_system_instructions():
     assert "Maria Kjeldsen" in p
     assert "ikke oplyst" in p
     assert "JSON" not in p
+
+
+def test_classify_falls_back_when_openai_returns_null_reply_text():
+    # str(None) would be "None", which passes the "not empty" check and would be sent to a
+    # customer as the reply. A null text field must be rejected like any other bad answer.
+    payload = {"kategori": "Klage", "prioritet": "Høj", "svar": None, "løsning": "x", "tid_sparet_min": 3}
+    r = classifier.classify(ticket("Jeg er utilfreds"), client=_fake_client(json.dumps(payload)))
+    assert r.kategori == "Klage"
+    assert "None" not in r.svar
+
+
+def test_classify_falls_back_when_openai_returns_no_choices():
+    client = MagicMock()
+    client.chat.completions.create.return_value = SimpleNamespace(choices=[])
+    r = classifier.classify(ticket("Hvor er min pakke?"), client=client)
+    assert r.kategori == "Levering"
+
+
+def test_resolve_model_treats_blank_env_as_unset(monkeypatch):
+    monkeypatch.setenv("OPENAI_MODEL", "")
+    assert classifier.resolve_model() == classifier.DEFAULT_MODEL
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-4o-mini")
+    assert classifier.resolve_model() == "gpt-4o-mini"
+    assert classifier.resolve_model("explicit") == "explicit"
+
+
+def test_make_client_sets_a_short_timeout_and_few_retries():
+    # The library default is a 10-minute timeout with 2 retries; a hung API would hold a
+    # ticket for half an hour before the local fallback got a chance.
+    client = classifier.make_client("sk-test")
+    assert client.timeout == classifier.API_TIMEOUT_SECONDS
+    assert client.max_retries == classifier.API_MAX_RETRIES

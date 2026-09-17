@@ -1,13 +1,15 @@
 """Kører en kø af kundehenvendelser gennem klassificering og udskriver resultatet."""
 
 import logging
+import os
 import textwrap
 from datetime import datetime
 from pathlib import Path
 
+import openai
 from dotenv import load_dotenv
 
-from classifier import classify
+from classifier import classify, make_client
 from models import Resultat, Ticket
 
 TICKETS_PER_DAG = 50
@@ -58,12 +60,12 @@ def udskriv(ticket: Ticket, result: Resultat) -> None:
     print(f"\n  Tid sparet: ~{result.tid_sparet_min} min")
 
 
-def run(tickets: list[Ticket]) -> int:
+def run(tickets: list[Ticket], client: openai.OpenAI | None = None) -> int:
     """Behandl alle tickets og returnér samlet estimeret tid sparet i minutter."""
     print(f"\n  {len(tickets)} tickets i kø\n")
     total = 0
     for ticket in tickets:
-        result = classify(ticket)
+        result = classify(ticket, client)
         udskriv(ticket, result)
         total += result.tid_sparet_min
 
@@ -78,7 +80,9 @@ def run(tickets: list[Ticket]) -> int:
 def main() -> None:
     load_dotenv(Path(__file__).parent / ".env")
     logging.basicConfig(level=logging.WARNING, format="  [%(levelname)s] %(message)s")
-    run(demo_tickets())
+    # Én klient til hele køen frem for en ny forbindelse pr. ticket.
+    api_key = os.environ.get("OPENAI_API_KEY")
+    run(demo_tickets(), make_client(api_key) if api_key else None)
 
 
 if __name__ == "__main__":

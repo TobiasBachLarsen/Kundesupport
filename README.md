@@ -20,6 +20,8 @@ python support.py
 
 Sæt `OPENAI_API_KEY` i `.env` for at bruge rigtig AI-klassificering. `OPENAI_MODEL` kan sætte modellen (standard `gpt-4o`). Uden nøgle bruger systemet automatisk den lokale, regelbaserede klassificering, som er deterministisk og ikke koster API-credits.
 
+API-kald har en timeout på 20 sekunder og ét ekstra forsøg; hænger eller fejler kaldet, eller svarer modellen noget, der ikke består valideringen, får ticketen den lokale klassificering i stedet, og det logges som en advarsel.
+
 **Tjek koden:**
 
 ```bash
@@ -47,3 +49,7 @@ tests/          # 22 tests af regelmotor, validering og fallback (AI-kald mockes
 ## Begrænsninger
 
 Det er en demo. Tallet for "tid sparet" er et skøn, ikke en måling, og svarudkastene skal læses af et menneske før afsendelse.
+
+## Roadmap
+
+Åbne forbedringer ligger som [issues](https://github.com/TobiasBachLarsen/Kundesupport/issues).
